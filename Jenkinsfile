@@ -7,27 +7,12 @@ pipeline {
     }
 
     stages {
-        stage("Checkout & Tagging") {
+        stage("Checkout") {
             steps {
                 echo "Checking out code and creating tag..."
                 script {
                     git branch: 'master',
                         url: 'https://github.com/dhibo/mission.git'
-                    
-                    def baseVersion = "1.0.1-SNAPSHOT"
-                    def fullVersion = "${baseVersion}-${env.BUILD_NUMBER}"
-                    
-                    echo "Base version: ${baseVersion}"
-                    echo "Full version: ${fullVersion}"
-                    echo "Build number: ${env.BUILD_NUMBER}"
-                    
-                    sh "mvn versions:set -DnewVersion=${fullVersion} -DgenerateBackupPoms=false"
-                    
-                    sh "git add pom.xml"
-                    sh "git commit -m 'Update version to ${fullVersion}' || true"
-                    sh "git tag -a ${fullVersion} -m 'Release ${fullVersion}'"
-                    
-                    echo "Tag ${fullVersion} created successfully"
                 }
             }
         }
