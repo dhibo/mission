@@ -153,12 +153,12 @@ pipeline {
         }
         failure {
             echo "Pipeline failed! Check the logs for details."
-            mail to: 'Arij.Hakouna@esprit.tn',
+            mail to: 'oussema.dhib@istic.ucar.tn',
                  subject: "[Jenkins] ECHEC du pipeline ${env.JOB_NAME} #${env.BUILD_NUMBER}",
                  body: "Le pipeline a échoué. Consultez les logs Jenkins pour plus de détails."
         }
         unstable {
-            mail to: 'Arij.Hakouna@esprit.tn',
+            mail to: 'oussema.dhib@istic.ucar.tn',
                  subject: "[Jenkins] Pipeline instable ${env.JOB_NAME} #${env.BUILD_NUMBER}",
                  body: "Le pipeline est instable. Consultez les logs Jenkins pour plus de détails."
         }
