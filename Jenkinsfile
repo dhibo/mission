@@ -63,11 +63,22 @@ pipeline {
                 echo "Deploying to Nexus repository..."
                 withCredentials([usernamePassword(credentialsId: 'jenkins_nexus', passwordVariable: 'NEXUS_PASSWORD', usernameVariable: 'NEXUS_USER')]) {
                     sh '''
-                    echo "OD ======> Configuring Maven settings for Nexus..."
-                    mvn deploy -DskipTests \
-                        -Dnexus.username=${NEXUS_USER} \
-                        -Dnexus.password=${NEXUS_PASSWORD} \
-                    '''
+                        # Create Maven settings.xml with Nexus credentials
+                        mkdir -p ~/.m2
+                        cat > ~/.m2/settings.xml << SETTINGS_EOF
+            <?xml version="1.0" encoding="UTF-8"?>
+            <settings xmlns="http://maven.apache.org/SETTINGS/1.0.0">
+                <servers>
+                    <server>
+                        <id>jenkins_nexus</id>
+                        <username>${NEXUS_USER}</username>
+                        <password>${NEXUS_PASSWORD}</password>
+                    </server>
+                </servers>
+            </settings>
+            SETTINGS_EOF
+                        mvn deploy -DskipTests
+            '''
                 }
             }
         }
