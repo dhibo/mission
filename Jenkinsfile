@@ -61,7 +61,7 @@ pipeline {
         stage("Nexus Deploy") {
             steps {
                 echo "Deploying to Nexus repository..."
-                withCredentials([usernamePassword(credentialsId: 'nexus_jenkins', passwordVariable: 'NEXUS_PASSWORD', usernameVariable: 'NEXUS_USER')]) {
+                withCredentials([usernamePassword(credentialsId: 'jenkins_nexus', passwordVariable: 'NEXUS_PASSWORD', usernameVariable: 'NEXUS_USER')]) {
                     sh '''
                     echo "OD ======> Configuring Maven settings for Nexus..."
                     mvn deploy -DskipTests \
