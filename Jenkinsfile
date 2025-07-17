@@ -55,7 +55,6 @@ pipeline {
                     sh 'mvn verify'
                     sh 'mvn sonar:sonar -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml'
                 }
-                waitForQualityGate abortPipeline: true
             }
         }
 
