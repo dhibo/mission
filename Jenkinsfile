@@ -67,7 +67,6 @@ pipeline {
                     mvn deploy -DskipTests \
                         -Dnexus.username=${NEXUS_USER} \
                         -Dnexus.password=${NEXUS_PASSWORD} \
-                        -s settings.xml
                     '''
                 }
             }
