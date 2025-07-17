@@ -22,6 +22,30 @@ pipeline {
             }
         }
 
+        stage("Unit Tests") {
+            steps {
+                echo "Running Unit Tests..."
+                sh 'mvn test -Dtest="*ServiceTest,*RestControllerTest" -DfailIfNoTests=false'
+            }
+            post {
+                always {
+                    junit '**/target/surefire-reports/*.xml'
+                }
+            }
+        }
+
+        stage("Integration Tests") {
+            steps {
+                echo "Running Integration Tests..."
+                sh 'mvn test -Dtest="*IntegrationTest" -DfailIfNoTests=false'
+            }
+            post {
+                always {
+                    junit '**/target/surefire-reports/*.xml'
+                }
+            }
+        }
+
         stage("MVN SONARQUBE") {
             steps {
                 withSonarQubeEnv('SonarQubeServer') {
