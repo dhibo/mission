@@ -12,7 +12,7 @@ pipeline {
                 echo "Checking out code and creating tag..."
                 script {
                     git branch: 'master',
-                        url: 'https://github.com/arijhakouna/tpFoyer.git'
+                        url: 'https://github.com/dhibo/mission.git'
                     
                     def baseVersion = "1.0.1-SNAPSHOT"
                     def fullVersion = "${baseVersion}-${env.BUILD_NUMBER}"
@@ -26,11 +26,8 @@ pipeline {
                     sh "git add pom.xml"
                     sh "git commit -m 'Update version to ${fullVersion}' || true"
                     sh "git tag -a ${fullVersion} -m 'Release ${fullVersion}'"
-                    sh "git push git@github.com:arijhakouna/tpFoyer.git ${fullVersion}"
                     
-                    echo "Tag ${fullVersion} created and pushed successfully"
-                    
-                
+                    echo "Tag ${fullVersion} created successfully"
                 }
             }
         }
@@ -77,40 +74,46 @@ pipeline {
             }
         }
 
-        stage("Nexus") {
+        stage("Nexus Deploy") {
             steps {
                 echo "Deploying to Nexus repository..."
-                sh 'mvn deploy -DskipTests'
+                withCredentials([usernamePassword(credentialsId: 'nexus_jenkins', passwordVariable: 'NEXUS_PASSWORD', usernameVariable: 'NEXUS_USER')]) {
+                    sh '''
+                    echo "OD ======> Configuring Maven settings for Nexus..."
+                    mvn deploy -DskipTests \
+                        -Dnexus.username=${NEXUS_USER} \
+                        -Dnexus.password=${NEXUS_PASSWORD} \
+                        -s settings.xml
+                    '''
+                }
             }
         }
 
-        stage("Docker") {
+        stage("Building Image") {
             steps {
-                echo "Building and pushing Docker image..."
+                echo "Building Docker image..."
                 script {
                     def version = sh(script: "mvn help:evaluate -Dexpression=project.version -q -DforceStdout", returnStdout: true).trim()
                     def tagVersion = version
                     
-                    echo "Using VERSION: ${version}"
-                    echo "Using TAG_VERSION: ${tagVersion}"
+                    echo "OD ======> Using VERSION: ${version}"
+                    echo "OD ======> Using TAG_VERSION: ${tagVersion}"
                     
                     sh """
                     docker build --build-arg VERSION=${version} -t tpfoyer:${tagVersion} .
-                    docker tag tpfoyer:${tagVersion} arijhakouna/tpfoyer:${tagVersion}
-                    docker login -u arijhakouna -p azerty123
-                    docker push arijhakouna/tpfoyer:${tagVersion}
+                    docker tag tpfoyer:${tagVersion} dhibo/tpfoyer:${tagVersion}
                     """
                 }
             }
         }
 
-        stage("Docker Compose") {
+        stage("Deploy Image") {
             steps {
-                echo "Deploying with Docker Compose..."
+                echo "Deploying Docker image..."
                 script {
                     def tagVersion = sh(script: "mvn help:evaluate -Dexpression=project.version -q -DforceStdout", returnStdout: true).trim()
                     
-                    echo "Using DOCKER_TAG: ${tagVersion}"
+                    echo "OD ======> Using DOCKER_TAG: ${tagVersion}"
                     sh """
                     export DOCKER_TAG=${tagVersion}
                     docker compose -f Docker-compose.yml up -d
@@ -119,48 +122,17 @@ pipeline {
                 }
             }
         }
-
-        stage('Monitoring') {
-            steps {
-                echo "Monitoring CPU/RAM via Prometheus"
-                sh '''
-                PROM_URL="http://192.168.1.4:9090"
-                CONTAINER="validation-tp-foyer-1"
-                CPU=$(curl -s "$PROM_URL/api/v1/query?query=rate(container_cpu_usage_seconds_total{container_label_io_kubernetes_container_name=\\"$CONTAINER\\"}[1m]) * 100" | jq '.data.result[0].value[1]' | tr -d '"')
-                RAM=$(curl -s "$PROM_URL/api/v1/query?query=container_memory_usage_bytes{container_label_io_kubernetes_container_name=\\"$CONTAINER\\"}" | jq '.data.result[0].value[1]' | tr -d '"')
-                RAM_MB=$(echo "$RAM / 1024 / 1024" | bc)
-                echo "CPU usage: $CPU %"
-                echo "RAM usage: $RAM_MB MB"
-
-                CONTAINER="validation-mysqldb-1"
-                CPU=$(curl -s "$PROM_URL/api/v1/query?query=rate(container_cpu_usage_seconds_total{container_label_io_kubernetes_container_name=\\"$CONTAINER\\"}[1m]) * 100" | jq '.data.result[0].value[1]' | tr -d '"')
-                RAM=$(curl -s "$PROM_URL/api/v1/query?query=container_memory_usage_bytes{container_label_io_kubernetes_container_name=\\"$CONTAINER\\"}" | jq '.data.result[0].value[1]' | tr -d '"')
-                RAM_MB=$(echo "$RAM / 1024 / 1024" | bc)
-                echo "CPU usage: $CPU %"
-                echo "RAM usage: $RAM_MB MB"
-                '''
-                echo "Consulte le dashboard Grafana ici : http://192.168.1.4:3000/d/874c43a4-20d9-4f85-894e-d8a1615a931c"
-            }
-        }
     }
 
     post {
         always {
-            echo "Pipeline completed with result: ${currentBuild.result}"
+            echo "OD ======> Pipeline completed with result: ${currentBuild.result}"
         }
         success {
-            echo "Pipeline succeeded! Application deployed successfully with tag ${env.TAG_VERSION}"
+            echo "OD ======> Pipeline succeeded! Application deployed successfully"
         }
         failure {
-            echo "Pipeline failed! Check the logs for details."
-            mail to: 'oussema.dhib@istic.ucar.tn',
-                 subject: "[Jenkins] ECHEC du pipeline ${env.JOB_NAME} #${env.BUILD_NUMBER}",
-                 body: "Le pipeline a échoué. Consultez les logs Jenkins pour plus de détails."
-        }
-        unstable {
-            mail to: 'oussema.dhib@istic.ucar.tn',
-                 subject: "[Jenkins] Pipeline instable ${env.JOB_NAME} #${env.BUILD_NUMBER}",
-                 body: "Le pipeline est instable. Consultez les logs Jenkins pour plus de détails."
+            echo "OD ======> Pipeline failed! Check the logs for details."
         }
     }
-}
+} 
