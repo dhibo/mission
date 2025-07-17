@@ -122,12 +122,12 @@
     <!-- Deploy to Nexus -->
     <distributionManagement>
         <repository>
-            <id>nexus_jenkins</id>
+            <id>jenkins_nexus</id>
             <name>Nexus Repository</name>
             <url>http://192.168.1.4:8081/repository/maven-releases/</url>
         </repository>
         <snapshotRepository>
-            <id>nexus_jenkins</id>
+            <id>jenkins_nexus</id>
             <name>Nexus Snapshot Repository</name>
             <url>http://192.168.1.4:8081/repository/maven-snapshots/</url>
         </snapshotRepository>
