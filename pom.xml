@@ -18,7 +18,7 @@
              <!-- Configuration SonarQube -->
              <sonar.projectKey>tp-foyer</sonar.projectKey>
              <sonar.projectName>TP Foyer</sonar.projectName>
-             <sonar.host.url>http://192.168.35.146:9000</sonar.host.url>
+             <sonar.host.url>http://192.168.1.4:9000</sonar.host.url>
              <sonar.coverage.jacoco.xmlReportPaths>target/site/jacoco/jacoco.xml</sonar.coverage.jacoco.xmlReportPaths>
     </properties>
     <dependencies>
@@ -124,12 +124,12 @@
         <repository>
             <id>nexus_jenkins</id>
             <name>Nexus Repository</name>
-            <url>http://192.168.35.146:8081/repository/maven-releases/</url>
+            <url>http://192.168.1.4:8081/repository/maven-releases/</url>
         </repository>
         <snapshotRepository>
             <id>nexus_jenkins</id>
             <name>Nexus Snapshot Repository</name>
-            <url>http://192.168.35.146:8081/repository/maven-snapshots/</url>
+            <url>http://192.168.1.4:8081/repository/maven-snapshots/</url>
         </snapshotRepository>
     </distributionManagement>
 
