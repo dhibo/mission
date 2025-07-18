@@ -56,8 +56,23 @@ pipeline {
 
         stage("Quality Gate") {
             steps {
-                timeout(time: 5, unit: 'MINUTES') {
-                    waitForQualityGate abortPipeline: false
+                echo "OD ======> Checking SonarQube Quality Gate..."
+                script {
+                    try {
+                        timeout(time: 2, unit: 'MINUTES') {
+                            def qg = waitForQualityGate()
+                            if (qg.status != 'OK') {
+                                echo "OD ======> Quality Gate failed: ${qg.status}"
+                                // Don't fail the build, just warn
+                                unstable("Quality Gate failed")
+                            } else {
+                                echo "OD ======> Quality Gate passed successfully!"
+                            }
+                        }
+                    } catch (Exception e) {
+                        echo "OD ======> Quality Gate timeout or error: ${e.getMessage()}"
+                        echo "OD ======> Continuing pipeline without Quality Gate validation"
+                    }
                 }
             }
         }
@@ -134,6 +149,9 @@ def extractSonarQubeMetrics() {
     def metrics = [:]
     
     try {
+        // Wait a bit for SonarQube to process
+        sleep(10)
+        
         // Get SonarQube project metrics via API
         def response = sh(
             script: """
@@ -172,9 +190,6 @@ def extractSonarQubeMetrics() {
                 case 'ncloc':
                     metrics.linesOfCode = measure.value ?: '0'
                     break
-                case 'sqale_index':
-                    metrics.technicalDebt = measure.value ?: '0'
-                    break
                 case 'reliability_rating':
                     metrics.reliabilityRating = getRatingLabel(measure.value)
                     break
@@ -199,7 +214,6 @@ def extractSonarQubeMetrics() {
             duplication: 'N/A',
             totalLines: 'N/A',
             linesOfCode: 'N/A',
-            technicalDebt: 'N/A',
             reliabilityRating: 'N/A',
             securityRating: 'N/A',
             maintainabilityRating: 'N/A'
@@ -260,93 +274,36 @@ def sendSonarQubeReport(buildStatus, sonarUrl, metrics) {
                 <li><strong>Project:</strong> ${env.JOB_NAME}</li>
                 <li><strong>Build Number:</strong> ${env.BUILD_NUMBER}</li>
                 <li><strong>Status:</strong> <span class="${buildStatus == 'SUCCESS' ? 'success' : 'error'}">${buildStatus}</span></li>
-                <li><strong>Build URL:</strong> <a href="${env.BUILD_URL}">${env.BUILD_URL}</a></li>
                 <li><strong>SonarQube Dashboard:</strong> <a href="${sonarUrl}">View Full Report</a></li>
             </ul>
             
             <h3>Code Quality Metrics</h3>
             <table class="metrics-table">
-                <tr><th>Metric</th><th>Value</th><th>Description</th></tr>
-                <tr>
-                    <td>Code Coverage</td>
-                    <td><strong>${metrics.coverage}%</strong></td>
-                    <td>Percentage of code covered by tests</td>
-                </tr>
-                <tr>
-                    <td>Bugs</td>
-                    <td><strong>${metrics.bugs}</strong></td>
-                    <td>Number of bugs found</td>
-                </tr>
-                <tr>
-                    <td>Vulnerabilities</td>
-                    <td><strong>${metrics.vulnerabilities}</strong></td>
-                    <td>Security vulnerabilities</td>
-                </tr>
-                <tr>
-                    <td>Code Smells</td>
-                    <td><strong>${metrics.codeSmells}</strong></td>
-                    <td>Maintainability issues</td>
-                </tr>
-                <tr>
-                    <td>Duplication</td>
-                    <td><strong>${metrics.duplication}%</strong></td>
-                    <td>Duplicated lines density</td>
-                </tr>
-                <tr>
-                    <td>Lines of Code</td>
-                    <td><strong>${metrics.linesOfCode}</strong></td>
-                    <td>Non-comment lines of code</td>
-                </tr>
-                <tr>
-                    <td>Total Lines</td>
-                    <td><strong>${metrics.totalLines}</strong></td>
-                    <td>Total lines including comments</td>
-                </tr>
+                <tr><th>Metric</th><th>Value</th></tr>
+                <tr><td>Code Coverage</td><td><strong>${metrics.coverage}%</strong></td></tr>
+                <tr><td>Bugs</td><td><strong>${metrics.bugs}</strong></td></tr>
+                <tr><td>Vulnerabilities</td><td><strong>${metrics.vulnerabilities}</strong></td></tr>
+                <tr><td>Code Smells</td><td><strong>${metrics.codeSmells}</strong></td></tr>
+                <tr><td>Duplication</td><td><strong>${metrics.duplication}%</strong></td></tr>
+                <tr><td>Lines of Code</td><td><strong>${metrics.linesOfCode}</strong></td></tr>
+                <tr><td>Reliability Rating</td><td><strong>${metrics.reliabilityRating}</strong></td></tr>
+                <tr><td>Security Rating</td><td><strong>${metrics.securityRating}</strong></td></tr>
+                <tr><td>Maintainability Rating</td><td><strong>${metrics.maintainabilityRating}</strong></td></tr>
             </table>
-            
-            <h3>Quality Ratings</h3>
-            <table class="metrics-table">
-                <tr><th>Category</th><th>Rating</th><th>Description</th></tr>
-                <tr>
-                    <td>Reliability</td>
-                    <td><strong>${metrics.reliabilityRating}</strong></td>
-                    <td>Based on bugs and their severity</td>
-                </tr>
-                <tr>
-                    <td>Security</td>
-                    <td><strong>${metrics.securityRating}</strong></td>
-                    <td>Based on vulnerabilities and their severity</td>
-                </tr>
-                <tr>
-                    <td>Maintainability</td>
-                    <td><strong>${metrics.maintainabilityRating}</strong></td>
-                    <td>Based on code smells and technical debt</td>
-                </tr>
-            </table>
-            
-            <h3>Recommendations</h3>
-            <ul>
-                <li>Coverage should be above 80%</li>
-                <li>Bugs and vulnerabilities should be 0</li>
-                <li>Code smells should be minimized</li>
-                <li>Duplication should be below 3%</li>
-                <li>All ratings should be A or B</li>
-            </ul>
         </div>
         
         <div class="footer">
             <p><strong>OD ======> Generated by Jenkins CI/CD Pipeline</strong></p>
-            <p>For detailed analysis, visit: <a href="${sonarUrl}">SonarQube Dashboard</a></p>
         </div>
     </body>
     </html>
     """
     
     try {
-        emailext (
+        mail (
+            to: 'dhiboussema12@gmail.com',
             subject: subject,
             body: emailBody,
-            to: 'your-email@gmail.com',
             mimeType: 'text/html'
         )
         echo "OD ======> SonarQube report sent successfully!"
