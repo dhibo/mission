@@ -1,41 +1,24 @@
 pipeline {
     agent any
 
-    environment {
-        VERSION = ''
-        TAG_VERSION = ''
-    }
-
     stages {
-        stage("Checkout & Tagging") {
+        stage("Git stage") {
             steps {
-                echo "Checking out code and creating tag..."
-                script {
-                    git branch: 'master',
-                        url: 'https://github.com/dhibo/mission.git'
-                    
-                    def baseVersion = "1.0.1-SNAPSHOT"
-                    def fullVersion = "${baseVersion}-${env.BUILD_NUMBER}"
-                    
-                    echo "Base version: ${baseVersion}"
-                    echo "Full version: ${fullVersion}"
-                    echo "Build number: ${env.BUILD_NUMBER}"
-                    
-                    sh "mvn versions:set -DnewVersion=${fullVersion} -DgenerateBackupPoms=false"
-                    
-                    sh "git add pom.xml"
-                    sh "git commit -m 'Update version to ${fullVersion}' || true"
-                    sh "git tag -a ${fullVersion} -m 'Release ${fullVersion}'"
-                    
-                    echo "Tag ${fullVersion} created successfully"
-                }
+                echo "Pulling from GitHub..."
+                git branch: 'master',
+                    url: 'https://github.com/dhibo/mission.git'
             }
         }
 
-        stage("Clean & Compile") {
+        stage("MVN CLEAN") {
             steps {
-                echo "Cleaning and compiling the project..."
-                sh 'mvn clean compile'
+                sh 'mvn clean'
+            }
+        }
+
+        stage("MVN COMPILE") {
+            steps {
+                sh 'mvn compile'
             }
         }
 
@@ -65,151 +48,75 @@ pipeline {
 
         stage("SonarQube Analysis") {
             steps {
-                echo "Running SonarQube analysis..."
                 withSonarQubeEnv('SonarQubeServer') {
-                    sh 'mvn verify'
-                    sh 'mvn sonar:sonar -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml'
+                    sh 'mvn sonar:sonar'
                 }
             }
         }
 
         stage("Quality Gate") {
             steps {
-                echo "OD ======> Checking SonarQube Quality Gate..."
-                timeout(time: 5, unit: 'MINUTES') {
-                    script {
-                        try {
-                            waitForQualityGate abortPipeline: false
-                            echo "OD ======> Quality Gate passed!"
-                        } catch (Exception e) {
-                            echo "OD ======> Quality Gate timeout or failed: ${e.getMessage()}"
-                            echo "OD ======> Continuing pipeline..."
-                        }
-                    }
-                }
+               imeout(time: 2, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: false
             }
         }
-
+        
         stage("Nexus Deploy") {
             steps {
-                echo "Deploying to Nexus repository..."
+                echo "OD ======> Deploying to Nexus repository..."
                 withCredentials([usernamePassword(credentialsId: 'jenkins_nexus', passwordVariable: 'NEXUS_PASSWORD', usernameVariable: 'NEXUS_USER')]) {
-                    script {
-                        echo "OD ======> Creating Maven settings.xml in workspace..."
-                        echo "OD ======> Nexus User: ${NEXUS_USER}"
-                        echo "OD ======> Workspace: ${env.WORKSPACE}"
-                        
-                        // Créer settings.xml dans le workspace
-                        writeFile file: 'settings.xml', text: '''<?xml version="1.0" encoding="UTF-8"?>
-<settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
-          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-          xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0
-                              https://maven.apache.org/xsd/settings-1.0.0.xsd">
-
-    <servers>
-        <server>
-            <id>nexus_jenkins</id>
-            <username>''' + env.NEXUS_USER + '''</username>
-            <password>''' + env.NEXUS_PASSWORD + '''</password>
-        </server>
-    </servers>
-
-    <profiles>
-        <profile>
-            <id>nexus</id>
-            <repositories>
-                <repository>
-                    <id>nexus_jenkins</id>
-                    <name>Nexus Repository</name>
-                    <url>http://192.168.1.4:8081/repository/maven-public/</url>
-                    <releases>
-                        <enabled>true</enabled>
-                    </releases>
-                    <snapshots>
-                        <enabled>true</enabled>
-                    </snapshots>
-                </repository>
-            </repositories>
-        </profile>
-    </profiles>
-
-    <activeProfiles>
-        <activeProfile>nexus</activeProfile>
-    </activeProfiles>
-
-</settings>'''
-                        
-                        // Vérifier que le fichier existe
-                        sh '''
-                        echo "OD ======> Verifying settings.xml creation..."
-                        ls -la settings.xml
-                        echo "OD ======> Settings.xml content:"
-                        cat settings.xml
-                        '''
-                        
-                        // Déployer vers Nexus
-                        sh '''
-                        echo "OD ======> Deploying to Nexus with explicit settings..."
-                        echo "OD ======> Current directory: $(pwd)"
-                        echo "OD ======> Maven version:"
-                        mvn --version
-                        
-                        mvn deploy -DskipTests \
-                            --settings ./settings.xml \
-                            -Dmaven.test.skip=true \
-                            -e
-                        '''
-                    }
+                    sh '''
+                    echo "OD ======> Using Nexus user: ${NEXUS_USER}"
+                    mvn deploy -DskipTests -Dusername=${NEXUS_USER} -Dpassword=${NEXUS_PASSWORD}
+                    '''
                 }
             }
         }
-
+        
         stage("Building Image") {
             steps {
-                echo "Building Docker image..."
                 script {
                     def version = sh(script: "mvn help:evaluate -Dexpression=project.version -q -DforceStdout", returnStdout: true).trim()
-                    def tagVersion = version
-                    
                     echo "OD ======> Using VERSION: ${version}"
-                    echo "OD ======> Using TAG_VERSION: ${tagVersion}"
                     
                     sh """
-                    docker build --build-arg VERSION=${version} -t tpfoyer:${tagVersion} .
-                    docker tag tpfoyer:${tagVersion} dhibo/tpfoyer:${tagVersion}
+                    docker build -t tpfoyer:${version} .
+                    docker tag tpfoyer:${version} dhibo/tpfoyer:${version}
                     """
                 }
             }
-        }
-
+        }                
+        
         stage("Deploy Image") {
             steps {
-                echo "Deploying Docker image..."
                 script {
-                    def tagVersion = sh(script: "mvn help:evaluate -Dexpression=project.version -q -DforceStdout", returnStdout: true).trim()
+                    def version = sh(script: "mvn help:evaluate -Dexpression=project.version -q -DforceStdout", returnStdout: true).trim()
+                    echo "OD ======> Using DOCKER_TAG: ${version}"
                     
-                    echo "OD ======> Using DOCKER_TAG: ${tagVersion}"
                     sh """
-                    export DOCKER_TAG=${tagVersion}
+                    export DOCKER_TAG=${version}
                     docker compose -f Docker-compose.yml up -d
                     docker ps -a
                     """
                 }
             }
-        }
+        }        
     }
-
+    
     post {
         always {
             echo "OD ======> Pipeline completed with result: ${currentBuild.result}"
             
-            // Nettoyer le fichier settings.xml
-            sh 'rm -f settings.xml'
-            
-            // Send email with corrected SonarQube metrics
+            // Send simple email with SonarQube link
             script {
                 def buildStatus = currentBuild.result ?: 'SUCCESS'
-                sendCorrectedSonarQubeReport(buildStatus)
+                def sonarUrl = "http://192.168.1.4:9000/dashboard?id=tp-foyer"
+                
+                // Extract basic SonarQube metrics using shell commands
+                def metrics = extractSonarQubeMetricsSimple()
+                
+                // Send email report
+                sendSimpleSonarQubeReport(buildStatus, sonarUrl, metrics)
             }
         }
         success {
@@ -221,100 +128,66 @@ pipeline {
     }
 }
 
-// Corrected function to extract SonarQube metrics
-def sendCorrectedSonarQubeReport(buildStatus) {
-    def subject = "OD ======> Pipeline Report - ${env.JOB_NAME} #${env.BUILD_NUMBER} - ${buildStatus}"
-    def sonarUrl = "http://192.168.1.4:9000/dashboard?id=tp-foyer"
-    
-    // Wait for SonarQube to process
-    echo "OD ======> Waiting for SonarQube to process results..."
-    sleep(30)
-    
-    // Get project key from pom.xml
-    def projectKey = sh(
-        script: "grep -o '<sonar.projectKey>.*</sonar.projectKey>' pom.xml | sed 's/<[^>]*>//g' || echo 'tp-foyer'",
-        returnStdout: true
-    ).trim()
-    
-    echo "OD ======> Using SonarQube project key: ${projectKey}"
-    
-    // Extract metrics with debugging
+// Simplified function to extract SonarQube metrics without readJSON
+def extractSonarQubeMetricsSimple() {
     def metrics = [:]
     
     try {
-        // Test different authentication methods
-        def authMethods = [
-            "admin:admin",
-            "admin:K4rQNF}MG6zwCQB"
-        ]
+        echo "OD ======> Waiting for SonarQube to process results..."
+        sleep(15)
         
-        def workingAuth = ""
-        for (auth in authMethods) {
-            def testResponse = sh(
-                script: "curl -s -u ${auth} 'http://192.168.1.4:9000/api/system/status' | grep -o 'UP' | wc -l",
-                returnStdout: true
-            ).trim()
-            
-            if (testResponse == "1") {
-                workingAuth = auth
-                echo "OD ======> Working SonarQube auth: ${auth}"
-                break
-            }
-        }
+        // Get basic metrics using curl and grep
+        def coverage = sh(
+            script: "curl -s -u admin:admin 'http://192.168.1.4:9000/api/measures/component?component=tp-foyer&metricKeys=coverage' | grep -o '\"value\":\"[^\"]*\"' | head -1 | cut -d'\"' -f4 || echo 'N/A'",
+            returnStdout: true
+        ).trim()
         
-        if (workingAuth) {
-            // Get metrics with working auth
-            def metricsToGet = ["coverage", "bugs", "vulnerabilities", "code_smells", "ncloc"]
-            
-            for (metric in metricsToGet) {
-                def value = sh(
-                    script: "curl -s -u ${workingAuth} 'http://192.168.1.4:9000/api/measures/component?component=${projectKey}&metricKeys=${metric}' | grep -o '\"value\":\"[^\"]*\"' | head -1 | cut -d'\"' -f4 || echo 'N/A'",
-                    returnStdout: true
-                ).trim()
-                
-                echo "OD ======> ${metric}: ${value}"
-                
-                switch(metric) {
-                    case "coverage":
-                        metrics.coverage = value ?: 'N/A'
-                        break
-                    case "bugs":
-                        metrics.bugs = value ?: 'N/A'
-                        break
-                    case "vulnerabilities":
-                        metrics.vulnerabilities = value ?: 'N/A'
-                        break
-                    case "code_smells":
-                        metrics.codeSmells = value ?: 'N/A'
-                        break
-                    case "ncloc":
-                        metrics.linesOfCode = value ?: 'N/A'
-                        break
-                }
-            }
-        } else {
-            echo "OD ======> No working SonarQube authentication found"
-            metrics = [
-                coverage: 'AUTH_ERROR',
-                bugs: 'AUTH_ERROR',
-                vulnerabilities: 'AUTH_ERROR',
-                codeSmells: 'AUTH_ERROR',
-                linesOfCode: 'AUTH_ERROR'
-            ]
-        }
+        def bugs = sh(
+            script: "curl -s -u admin:admin 'http://192.168.1.4:9000/api/measures/component?component=tp-foyer&metricKeys=bugs' | grep -o '\"value\":\"[^\"]*\"' | head -1 | cut -d'\"' -f4 || echo 'N/A'",
+            returnStdout: true
+        ).trim()
+        
+        def vulnerabilities = sh(
+            script: "curl -s -u admin:admin 'http://192.168.1.4:9000/api/measures/component?component=tp-foyer&metricKeys=vulnerabilities' | grep -o '\"value\":\"[^\"]*\"' | head -1 | cut -d'\"' -f4 || echo 'N/A'",
+            returnStdout: true
+        ).trim()
+        
+        def codeSmells = sh(
+            script: "curl -s -u admin:admin 'http://192.168.1.4:9000/api/measures/component?component=tp-foyer&metricKeys=code_smells' | grep -o '\"value\":\"[^\"]*\"' | head -1 | cut -d'\"' -f4 || echo 'N/A'",
+            returnStdout: true
+        ).trim()
+        
+        def linesOfCode = sh(
+            script: "curl -s -u admin:admin 'http://192.168.1.4:9000/api/measures/component?component=tp-foyer&metricKeys=ncloc' | grep -o '\"value\":\"[^\"]*\"' | head -1 | cut -d'\"' -f4 || echo 'N/A'",
+            returnStdout: true
+        ).trim()
+        
+        metrics.coverage = coverage ?: 'N/A'
+        metrics.bugs = bugs ?: 'N/A'
+        metrics.vulnerabilities = vulnerabilities ?: 'N/A'
+        metrics.codeSmells = codeSmells ?: 'N/A'
+        metrics.linesOfCode = linesOfCode ?: 'N/A'
+        
+        echo "OD ======> Extracted metrics: Coverage=${metrics.coverage}, Bugs=${metrics.bugs}, Vulnerabilities=${metrics.vulnerabilities}, Code Smells=${metrics.codeSmells}, Lines=${metrics.linesOfCode}"
         
     } catch (Exception e) {
         echo "OD ======> Error extracting SonarQube metrics: ${e.getMessage()}"
         metrics = [
-            coverage: 'ERROR',
-            bugs: 'ERROR',
-            vulnerabilities: 'ERROR',
-            codeSmells: 'ERROR',
-            linesOfCode: 'ERROR'
+            coverage: 'N/A',
+            bugs: 'N/A',
+            vulnerabilities: 'N/A',
+            codeSmells: 'N/A',
+            linesOfCode: 'N/A'
         ]
     }
     
-    // Send email with debugging info
+    return metrics
+}
+
+// Simplified function to send email report
+def sendSimpleSonarQubeReport(buildStatus, sonarUrl, metrics) {
+    def subject = "OD ======> Pipeline Report - ${env.JOB_NAME} #${env.BUILD_NUMBER} - ${buildStatus}"
+    
     def emailBody = """
     <html>
     <head>
@@ -326,7 +199,6 @@ def sendCorrectedSonarQubeReport(buildStatus) {
             .success { color: #4CAF50; font-weight: bold; }
             .error { color: #f44336; font-weight: bold; }
             .link { color: #2196F3; text-decoration: none; }
-            .debug { background-color: #fff3cd; padding: 10px; margin: 10px 0; }
         </style>
     </head>
     <body>
@@ -352,25 +224,17 @@ def sendCorrectedSonarQubeReport(buildStatus) {
                 <p><strong>📝 Lines of Code:</strong> ${metrics.linesOfCode}</p>
             </div>
             
-            <div class="debug">
-                <h4>Debug Information</h4>
-                <p><strong>Project Key:</strong> ${projectKey}</p>
-                <p><strong>SonarQube URL:</strong> <a href="${sonarUrl}" class="link">${sonarUrl}</a></p>
-                <p><strong>Note:</strong> Si les métriques affichent 'N/A', vérifiez que SonarQube a analysé le projet.</p>
-            </div>
-            
             <h3>Actions</h3>
             <ul>
                 <li><a href="${sonarUrl}" class="link">📈 View Full SonarQube Report</a></li>
                 <li><a href="${env.BUILD_URL}console" class="link">📋 View Build Console</a></li>
-                <li><a href="http://192.168.1.4:9000/projects" class="link">🔍 View All SonarQube Projects</a></li>
             </ul>
             
-            <h3>Troubleshooting</h3>
+            <h3>Recommendations</h3>
             <ul>
-                <li>✅ Vérifiez que le projet existe dans SonarQube</li>
-                <li>✅ Confirmez que l'analyse s'est terminée avec succès</li>
-                <li>✅ Vérifiez les credentials SonarQube</li>
+                <li>✅ Keep code coverage above 80%</li>
+                <li>✅ Fix all bugs and vulnerabilities</li>
+                <li>✅ Reduce code smells for better maintainability</li>
             </ul>
         </div>
         
@@ -392,4 +256,4 @@ def sendCorrectedSonarQubeReport(buildStatus) {
     } catch (Exception e) {
         echo "OD ======> Failed to send email: ${e.getMessage()}"
     }
-} 
+}
