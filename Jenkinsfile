@@ -117,7 +117,28 @@ pipeline {
                     """
                 }
             }
-        }                
+        }
+
+        stage("Cleanup Previous Deployment") {
+            steps {
+                script {
+                    echo "OD ======> Cleaning up previous deployment..."
+                    sh '''
+                    # Stop and remove existing containers
+                    docker compose -f Docker-compose.yml down --remove-orphans || true
+                    
+                    # Remove any containers using port 3306 or 8089
+                    docker ps -a --filter "publish=3306" --filter "publish=8089" -q | xargs -r docker stop || true
+                    docker ps -a --filter "publish=3306" --filter "publish=8089" -q | xargs -r docker rm || true
+                    
+                    # Clean up dangling images
+                    docker image prune -f || true
+                    
+                    echo "OD ======> Cleanup completed"
+                    '''
+                }
+            }
+        }
         
         stage("Deploy Image") {
             steps {
