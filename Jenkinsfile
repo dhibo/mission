@@ -14,7 +14,7 @@ pipeline {
         stage("Git stage") {
             steps {
                 echo "Pulling from GitHub..."
-                git branch: 'Tagging',
+                git branch: 'master',
                     url: 'https://github.com/dhibo/mission.git'
             }
         }
