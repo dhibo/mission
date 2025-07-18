@@ -2,16 +2,10 @@ pipeline {
     agent any
 
     environment {
-        // Dynamic SonarQube credentials
+        // Public configuration only - no credentials
         SONAR_HOST_URL = 'http://192.168.1.4:9000'
         SONAR_PROJECT_KEY = 'tp-foyer'
-        SONAR_USERNAME = 'admin'
-        SONAR_PASSWORD = 'QN9Y#bK;nU;xpW3'
-        
-        // Email configuration
         RECIPIENT_EMAIL = 'dhiboussema12@gmail.com'
-        
-        // Project configuration
         NEXUS_URL = 'http://192.168.1.4:8081'
         DOCKER_REGISTRY = 'dhibo'
     }
@@ -148,8 +142,8 @@ pipeline {
                 def buildStatus = currentBuild.result ?: 'SUCCESS'
                 def sonarUrl = "${SONAR_HOST_URL}/dashboard?id=${SONAR_PROJECT_KEY}"
                 
-                // Extract basic SonarQube metrics using dynamic credentials
-                def metrics = extractSonarQubeMetricsSimple()
+                // Extract SonarQube metrics using secure credentials
+                def metrics = extractSonarQubeMetricsSecure()
                 
                 // Send email report
                 sendSimpleSonarQubeReport(buildStatus, sonarUrl, metrics)
@@ -167,56 +161,57 @@ pipeline {
     }
 }
 
-// Dynamic function to extract SonarQube metrics
-def extractSonarQubeMetricsSimple() {
+// Secure function to extract SonarQube metrics using Jenkins credentials
+def extractSonarQubeMetricsSecure() {
     def metrics = [:]
     
     try {
         echo "OD ======> Waiting for SonarQube to process results..."
         sleep(10)
         
-        // Use dynamic credentials from environment variables
-        def auth = "${SONAR_USERNAME}:${SONAR_PASSWORD}"
-        def baseUrl = "${SONAR_HOST_URL}/api/measures/component?component=${SONAR_PROJECT_KEY}&metricKeys="
-        
-        // Get basic metrics using curl and grep with dynamic auth
-        def coverage = sh(
-            script: "curl -s -u '${auth}' '${baseUrl}coverage' | grep -o '\"value\":\"[^\"]*\"' | head -1 | cut -d'\"' -f4 || echo 'N/A'",
-            returnStdout: true
-        ).trim()
-        
-        def bugs = sh(
-            script: "curl -s -u '${auth}' '${baseUrl}bugs' | grep -o '\"value\":\"[^\"]*\"' | head -1 | cut -d'\"' -f4 || echo 'N/A'",
-            returnStdout: true
-        ).trim()
-        
-        def vulnerabilities = sh(
-            script: "curl -s -u '${auth}' '${baseUrl}vulnerabilities' | grep -o '\"value\":\"[^\"]*\"' | head -1 | cut -d'\"' -f4 || echo 'N/A'",
-            returnStdout: true
-        ).trim()
-        
-        def codeSmells = sh(
-            script: "curl -s -u '${auth}' '${baseUrl}code_smells' | grep -o '\"value\":\"[^\"]*\"' | head -1 | cut -d'\"' -f4 || echo 'N/A'",
-            returnStdout: true
-        ).trim()
-        
-        def linesOfCode = sh(
-            script: "curl -s -u '${auth}' '${baseUrl}ncloc' | grep -o '\"value\":\"[^\"]*\"' | head -1 | cut -d'\"' -f4 || echo 'N/A'",
-            returnStdout: true
-        ).trim()
-        
-        // Get Quality Gate status
-        def qualityGate = sh(
-            script: "curl -s -u '${auth}' '${SONAR_HOST_URL}/api/qualitygates/project_status?projectKey=${SONAR_PROJECT_KEY}' | grep -o '\"status\":\"[^\"]*\"' | head -1 | cut -d'\"' -f4 || echo 'N/A'",
-            returnStdout: true
-        ).trim()
-        
-        metrics.coverage = coverage ?: 'N/A'
-        metrics.bugs = bugs ?: 'N/A'
-        metrics.vulnerabilities = vulnerabilities ?: 'N/A'
-        metrics.codeSmells = codeSmells ?: 'N/A'
-        metrics.linesOfCode = linesOfCode ?: 'N/A'
-        metrics.qualityGate = qualityGate ?: 'N/A'
+        // Use Jenkins credentials securely
+        withCredentials([string(credentialsId: 'creds', variable: 'SONAR_TOKEN')]) {
+            def baseUrl = "${SONAR_HOST_URL}/api/measures/component?component=${SONAR_PROJECT_KEY}&metricKeys="
+            
+            // Get metrics using the secure token
+            def coverage = sh(
+                script: "curl -s -u \"\${SONAR_TOKEN}:\" '${baseUrl}coverage' | grep -o '\"value\":\"[^\"]*\"' | head -1 | cut -d'\"' -f4 || echo 'N/A'",
+                returnStdout: true
+            ).trim()
+            
+            def bugs = sh(
+                script: "curl -s -u \"\${SONAR_TOKEN}:\" '${baseUrl}bugs' | grep -o '\"value\":\"[^\"]*\"' | head -1 | cut -d'\"' -f4 || echo 'N/A'",
+                returnStdout: true
+            ).trim()
+            
+            def vulnerabilities = sh(
+                script: "curl -s -u \"\${SONAR_TOKEN}:\" '${baseUrl}vulnerabilities' | grep -o '\"value\":\"[^\"]*\"' | head -1 | cut -d'\"' -f4 || echo 'N/A'",
+                returnStdout: true
+            ).trim()
+            
+            def codeSmells = sh(
+                script: "curl -s -u \"\${SONAR_TOKEN}:\" '${baseUrl}code_smells' | grep -o '\"value\":\"[^\"]*\"' | head -1 | cut -d'\"' -f4 || echo 'N/A'",
+                returnStdout: true
+            ).trim()
+            
+            def linesOfCode = sh(
+                script: "curl -s -u \"\${SONAR_TOKEN}:\" '${baseUrl}ncloc' | grep -o '\"value\":\"[^\"]*\"' | head -1 | cut -d'\"' -f4 || echo 'N/A'",
+                returnStdout: true
+            ).trim()
+            
+            // Get Quality Gate status
+            def qualityGate = sh(
+                script: "curl -s -u \"\${SONAR_TOKEN}:\" '${SONAR_HOST_URL}/api/qualitygates/project_status?projectKey=${SONAR_PROJECT_KEY}' | grep -o '\"status\":\"[^\"]*\"' | head -1 | cut -d'\"' -f4 || echo 'N/A'",
+                returnStdout: true
+            ).trim()
+            
+            metrics.coverage = coverage ?: 'N/A'
+            metrics.bugs = bugs ?: 'N/A'
+            metrics.vulnerabilities = vulnerabilities ?: 'N/A'
+            metrics.codeSmells = codeSmells ?: 'N/A'
+            metrics.linesOfCode = linesOfCode ?: 'N/A'
+            metrics.qualityGate = qualityGate ?: 'N/A'
+        }
         
         echo "OD ======> Extracted metrics: Coverage=${metrics.coverage}, Bugs=${metrics.bugs}, Vulnerabilities=${metrics.vulnerabilities}, Code Smells=${metrics.codeSmells}, Lines=${metrics.linesOfCode}, Quality Gate=${metrics.qualityGate}"
         
@@ -235,7 +230,7 @@ def extractSonarQubeMetricsSimple() {
     return metrics
 }
 
-// Dynamic function to send email report
+// Function to send email report
 def sendSimpleSonarQubeReport(buildStatus, sonarUrl, metrics) {
     def subject = "OD ======> Pipeline Report - ${env.JOB_NAME} #${env.BUILD_NUMBER} - ${buildStatus}"
     
@@ -258,6 +253,7 @@ def sendSimpleSonarQubeReport(buildStatus, sonarUrl, metrics) {
             .quality-gate { padding: 10px; margin: 10px 0; border-radius: 5px; }
             .quality-gate.OK { background-color: #d4edda; color: #155724; }
             .quality-gate.ERROR { background-color: #f8d7da; color: #721c24; }
+            .quality-gate.N_A { background-color: #fff3cd; color: #856404; }
         </style>
     </head>
     <body>
@@ -266,46 +262,48 @@ def sendSimpleSonarQubeReport(buildStatus, sonarUrl, metrics) {
         </div>
         
         <div class="content">
-            <h3>Build Information</h3>
+            <h3>🔧 Build Information</h3>
             <ul>
                 <li><strong>Project:</strong> ${env.JOB_NAME}</li>
                 <li><strong>Build Number:</strong> ${env.BUILD_NUMBER}</li>
                 <li><strong>Status:</strong> <span class="${buildStatus == 'SUCCESS' ? 'success' : (buildStatus == 'UNSTABLE' ? 'warning' : 'error')}">${buildStatus}</span></li>
                 <li><strong>Build URL:</strong> <a href="${env.BUILD_URL}" class="link">${env.BUILD_URL}</a></li>
                 <li><strong>Duration:</strong> ${currentBuild.durationString}</li>
+                <li><strong>Node:</strong> ${env.NODE_NAME}</li>
             </ul>
             
-            <h3>SonarQube Analysis Results</h3>
-            <div class="quality-gate ${metrics.qualityGate}">
-                <h4>Quality Gate Status: ${metrics.qualityGate}</h4>
+            <h3>📊 SonarQube Analysis Results</h3>
+            <div class="quality-gate ${metrics.qualityGate.replace('/', '_')}">
+                <h4>🎯 Quality Gate Status: ${metrics.qualityGate}</h4>
             </div>
             
             <div class="metrics">
-                <p><strong>📊 Code Coverage:</strong> ${metrics.coverage}${metrics.coverage != 'N/A' && metrics.coverage != 'ERROR' ? '%' : ''}</p>
+                <p><strong>📈 Code Coverage:</strong> ${metrics.coverage}${metrics.coverage != 'N/A' && metrics.coverage != 'ERROR' ? '%' : ''}</p>
                 <p><strong>🐛 Bugs:</strong> ${metrics.bugs}</p>
                 <p><strong>🔒 Vulnerabilities:</strong> ${metrics.vulnerabilities}</p>
                 <p><strong>💡 Code Smells:</strong> ${metrics.codeSmells}</p>
                 <p><strong>📝 Lines of Code:</strong> ${metrics.linesOfCode}</p>
             </div>
             
-            <h3>Actions</h3>
+            <h3>🔗 Quick Actions</h3>
             <ul>
                 <li><a href="${sonarUrl}" class="link">📈 View Full SonarQube Report</a></li>
                 <li><a href="${env.BUILD_URL}console" class="link">📋 View Build Console</a></li>
                 <li><a href="${SONAR_HOST_URL}/projects" class="link">📊 All SonarQube Projects</a></li>
+                <li><a href="${env.BUILD_URL}testReport" class="link">🧪 Test Results</a></li>
             </ul>
             
-            <h3>Recommendations</h3>
+            <h3>💡 Quality Recommendations</h3>
             <ul>
-                <li>✅ Keep code coverage above 80%</li>
-                <li>✅ Fix all bugs and vulnerabilities</li>
-                <li>✅ Reduce code smells for better maintainability</li>
-                <li>✅ Ensure Quality Gate passes</li>
+                <li>✅ Target: Code coverage above 80%</li>
+                <li>✅ Priority: Fix all bugs and vulnerabilities</li>
+                <li>✅ Maintenance: Reduce code smells</li>
+                <li>✅ Goal: Ensure Quality Gate passes</li>
             </ul>
         </div>
         
         <div class="footer" style="margin-top: 30px; padding: 10px; background-color: #f0f0f0; text-align: center;">
-            <p><strong>OD ======> Generated by Jenkins CI/CD Pipeline</strong></p>
+            <p><strong>🚀 Generated by Jenkins CI/CD Pipeline</strong></p>
             <p>Environment: ${env.NODE_NAME} | Build Date: ${new Date()}</p>
         </div>
     </body>
