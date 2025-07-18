@@ -107,12 +107,11 @@ pipeline {
         stage("Building Image") {
             steps {
                 script {
-                    def version = sh(script: "mvn help:evaluate -Dexpression=project.version -q -DforceStdout", returnStdout: true).trim()
-                    echo "OD ======> Using VERSION: ${version}"
+
                     
                     sh """
-                    docker build -t tpfoyer:${version} .
-                    docker tag tpfoyer:${version} ${DOCKER_REGISTRY}/tpfoyer:${version}
+                    docker build -t tpfoyer:latest .
+                    docker tag tpfoyer:latest ${DOCKER_REGISTRY}/tpfoyer:latest
                     """
                 }
             }
@@ -121,11 +120,7 @@ pipeline {
         stage("Deploy Image") {
             steps {
                 script {
-                    def version = sh(script: "mvn help:evaluate -Dexpression=project.version -q -DforceStdout", returnStdout: true).trim()
-                    echo "OD ======> Using DOCKER_TAG: ${version}"
-                    
                     sh """
-                    export DOCKER_TAG=${version}
                     docker compose -f Docker-compose.yml up -d
                     docker ps -a
                     """
