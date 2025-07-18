@@ -105,7 +105,7 @@ pipeline {
                     echo "OD ======> Building Docker image with VERSION: ${version}"
                     
                     sh """
-                    docker build -t tpfoyer:${version} .
+                    docker build --build-arg VERSION=${version} -t tpfoyer:${version} .
                     docker tag tpfoyer:${version} dhibo/tpfoyer:${version}
                     """
                 }
