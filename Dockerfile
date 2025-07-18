@@ -1,7 +1,7 @@
 FROM openjdk:17-jdk
 
 # Arguments de build pour la version
-ARG VERSION=5.0.1-SNAPSHOT
+ARG VERSION=5.0.1
 ARG JAR_FILE=tp-foyer-${VERSION}.jar
 
 # Variables d'environnement
