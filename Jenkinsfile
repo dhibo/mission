@@ -30,6 +30,14 @@ pipeline {
             post {
                 always {
                     junit '**/target/surefire-reports/*.xml'
+                    publishHTML([
+                        allowMissing: false,
+                        alwaysLinkToLastBuild: true,
+                        keepAll: true,
+                        reportDir: 'target/surefire-reports',
+                        reportFiles: 'index.html',
+                        reportName: 'Unit Test Report'
+                    ])
                 }
             }
         }
@@ -46,11 +54,38 @@ pipeline {
             }
         }
 
-        stage("MVN SONARQUBE") {
+        stage("Code Coverage") {
+            steps {
+                echo "Generating Code Coverage Report..."
+                sh 'mvn jacoco:report'
+            }
+            post {
+                always {
+                    publishHTML([
+                        allowMissing: false,
+                        alwaysLinkToLastBuild: true,
+                        keepAll: true,
+                        reportDir: 'target/site/jacoco',
+                        reportFiles: 'index.html',
+                        reportName: 'Code Coverage Report'
+                    ])
+                }
+            }
+        }
+
+        stage("SonarQube Analysis") {
             steps {
                 withSonarQubeEnv('SonarQubeServer') {
                     sh 'mvn sonar:sonar'
-                } 
+                }
+            }
+        }
+
+        stage("Quality Gate") {
+            steps {
+                timeout(time: 5, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: false
+                }
             }
         }
         
@@ -99,6 +134,36 @@ pipeline {
     post {
         always {
             echo "OD ======> Pipeline completed with result: ${currentBuild.result}"
+            
+            // Generate and send email report
+            script {
+                def sonarUrl = "http://192.168.1.4:9000/dashboard?id=tp-foyer"
+                def buildStatus = currentBuild.result ?: 'SUCCESS'
+                
+                emailext (
+                    subject: "OD ======> Pipeline Report - ${env.JOB_NAME} - Build #${env.BUILD_NUMBER} - ${buildStatus}",
+                    body: """
+                    <h2>Pipeline Execution Report</h2>
+                    <p><strong>Job:</strong> ${env.JOB_NAME}</p>
+                    <p><strong>Build Number:</strong> ${env.BUILD_NUMBER}</p>
+                    <p><strong>Status:</strong> ${buildStatus}</p>
+                    <p><strong>Build URL:</strong> <a href="${env.BUILD_URL}">${env.BUILD_URL}</a></p>
+                    
+                    <h3>SonarQube Analysis</h3>
+                    <p><strong>SonarQube Dashboard:</strong> <a href="${sonarUrl}">View Report</a></p>
+                    
+                    <h3>Code Coverage</h3>
+                    <p><strong>Coverage Report:</strong> <a href="${env.BUILD_URL}Code_Coverage_Report/">View Coverage</a></p>
+                    
+                    <h3>Test Results</h3>
+                    <p><strong>Unit Tests:</strong> <a href="${env.BUILD_URL}Unit_Test_Report/">View Unit Tests</a></p>
+                    
+                    <p>OD ======> Pipeline execution completed successfully!</p>
+                    """,
+                    to: "your-email@example.com",
+                    mimeType: 'text/html'
+                )
+            }
         }
         success {
             echo "OD ======> Pipeline succeeded! Application deployed successfully"
