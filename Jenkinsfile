@@ -85,6 +85,13 @@ pipeline {
                 } 
             }
         }
+
+        stage("MVN PACKAGE") {
+            steps {
+                echo "OD ======> Creating JAR file with version ${env.PROJECT_VERSION}..."
+                sh 'mvn package -DskipTests'
+            }
+        }
         
         stage("Nexus Deploy") {
             steps {
