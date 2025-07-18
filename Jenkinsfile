@@ -56,8 +56,10 @@ pipeline {
 
         stage("Quality Gate") {
             steps {
-               imeout(time: 2, unit: 'MINUTES') {
+                echo "OD ======> Checking Quality Gate..."
+                timeout(time: 2, unit: 'MINUTES') {
                     waitForQualityGate abortPipeline: false
+                }
             }
         }
         
@@ -65,10 +67,28 @@ pipeline {
             steps {
                 echo "OD ======> Deploying to Nexus repository..."
                 withCredentials([usernamePassword(credentialsId: 'jenkins_nexus', passwordVariable: 'NEXUS_PASSWORD', usernameVariable: 'NEXUS_USER')]) {
-                    sh '''
-                    echo "OD ======> Using Nexus user: ${NEXUS_USER}"
-                    mvn deploy -DskipTests -Dusername=${NEXUS_USER} -Dpassword=${NEXUS_PASSWORD}
-                    '''
+                    script {
+                        // Créer settings.xml dynamiquement
+                        writeFile file: 'settings.xml', text: '''<?xml version="1.0" encoding="UTF-8"?>
+<settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0
+                              https://maven.apache.org/xsd/settings-1.0.0.xsd">
+    <servers>
+        <server>
+            <id>nexus_jenkins</id>
+            <username>''' + env.NEXUS_USER + '''</username>
+            <password>''' + env.NEXUS_PASSWORD + '''</password>
+        </server>
+    </servers>
+</settings>'''
+                        
+                        sh '''
+                        echo "OD ======> Using Nexus user: ${NEXUS_USER}"
+                        echo "OD ======> Deploying with settings.xml..."
+                        mvn deploy -DskipTests --settings ./settings.xml
+                        '''
+                    }
                 }
             }
         }
@@ -107,6 +127,9 @@ pipeline {
         always {
             echo "OD ======> Pipeline completed with result: ${currentBuild.result}"
             
+            // Nettoyer settings.xml
+            sh 'rm -f settings.xml'
+            
             // Send simple email with SonarQube link
             script {
                 def buildStatus = currentBuild.result ?: 'SUCCESS'
@@ -134,50 +157,86 @@ def extractSonarQubeMetricsSimple() {
     
     try {
         echo "OD ======> Waiting for SonarQube to process results..."
-        sleep(15)
+        sleep(20)
         
-        // Get basic metrics using curl and grep
-        def coverage = sh(
-            script: "curl -s -u admin:admin 'http://192.168.1.4:9000/api/measures/component?component=tp-foyer&metricKeys=coverage' | grep -o '\"value\":\"[^\"]*\"' | head -1 | cut -d'\"' -f4 || echo 'N/A'",
-            returnStdout: true
-        ).trim()
+        // Test different authentication methods
+        def authMethods = ["admin:admin", "admin:K4rQNF}MG6zwCQB"]
+        def workingAuth = ""
         
-        def bugs = sh(
-            script: "curl -s -u admin:admin 'http://192.168.1.4:9000/api/measures/component?component=tp-foyer&metricKeys=bugs' | grep -o '\"value\":\"[^\"]*\"' | head -1 | cut -d'\"' -f4 || echo 'N/A'",
-            returnStdout: true
-        ).trim()
+        for (auth in authMethods) {
+            def testResponse = sh(
+                script: "curl -s -u ${auth} 'http://192.168.1.4:9000/api/system/status' | grep -c 'UP' || echo '0'",
+                returnStdout: true
+            ).trim()
+            
+            if (testResponse == "1") {
+                workingAuth = auth
+                echo "OD ======> Working SonarQube auth: ${auth}"
+                break
+            }
+        }
         
-        def vulnerabilities = sh(
-            script: "curl -s -u admin:admin 'http://192.168.1.4:9000/api/measures/component?component=tp-foyer&metricKeys=vulnerabilities' | grep -o '\"value\":\"[^\"]*\"' | head -1 | cut -d'\"' -f4 || echo 'N/A'",
-            returnStdout: true
-        ).trim()
-        
-        def codeSmells = sh(
-            script: "curl -s -u admin:admin 'http://192.168.1.4:9000/api/measures/component?component=tp-foyer&metricKeys=code_smells' | grep -o '\"value\":\"[^\"]*\"' | head -1 | cut -d'\"' -f4 || echo 'N/A'",
-            returnStdout: true
-        ).trim()
-        
-        def linesOfCode = sh(
-            script: "curl -s -u admin:admin 'http://192.168.1.4:9000/api/measures/component?component=tp-foyer&metricKeys=ncloc' | grep -o '\"value\":\"[^\"]*\"' | head -1 | cut -d'\"' -f4 || echo 'N/A'",
-            returnStdout: true
-        ).trim()
-        
-        metrics.coverage = coverage ?: 'N/A'
-        metrics.bugs = bugs ?: 'N/A'
-        metrics.vulnerabilities = vulnerabilities ?: 'N/A'
-        metrics.codeSmells = codeSmells ?: 'N/A'
-        metrics.linesOfCode = linesOfCode ?: 'N/A'
-        
-        echo "OD ======> Extracted metrics: Coverage=${metrics.coverage}, Bugs=${metrics.bugs}, Vulnerabilities=${metrics.vulnerabilities}, Code Smells=${metrics.codeSmells}, Lines=${metrics.linesOfCode}"
+        if (workingAuth) {
+            // Get project key from pom.xml
+            def projectKey = sh(
+                script: "grep -o '<sonar.projectKey>.*</sonar.projectKey>' pom.xml | sed 's/<[^>]*>//g' || echo 'tp-foyer'",
+                returnStdout: true
+            ).trim()
+            
+            echo "OD ======> Using project key: ${projectKey}"
+            
+            // Get basic metrics using curl and grep
+            def coverage = sh(
+                script: "curl -s -u ${workingAuth} 'http://192.168.1.4:9000/api/measures/component?component=${projectKey}&metricKeys=coverage' | grep -o '\"value\":\"[^\"]*\"' | head -1 | cut -d'\"' -f4 || echo 'N/A'",
+                returnStdout: true
+            ).trim()
+            
+            def bugs = sh(
+                script: "curl -s -u ${workingAuth} 'http://192.168.1.4:9000/api/measures/component?component=${projectKey}&metricKeys=bugs' | grep -o '\"value\":\"[^\"]*\"' | head -1 | cut -d'\"' -f4 || echo 'N/A'",
+                returnStdout: true
+            ).trim()
+            
+            def vulnerabilities = sh(
+                script: "curl -s -u ${workingAuth} 'http://192.168.1.4:9000/api/measures/component?component=${projectKey}&metricKeys=vulnerabilities' | grep -o '\"value\":\"[^\"]*\"' | head -1 | cut -d'\"' -f4 || echo 'N/A'",
+                returnStdout: true
+            ).trim()
+            
+            def codeSmells = sh(
+                script: "curl -s -u ${workingAuth} 'http://192.168.1.4:9000/api/measures/component?component=${projectKey}&metricKeys=code_smells' | grep -o '\"value\":\"[^\"]*\"' | head -1 | cut -d'\"' -f4 || echo 'N/A'",
+                returnStdout: true
+            ).trim()
+            
+            def linesOfCode = sh(
+                script: "curl -s -u ${workingAuth} 'http://192.168.1.4:9000/api/measures/component?component=${projectKey}&metricKeys=ncloc' | grep -o '\"value\":\"[^\"]*\"' | head -1 | cut -d'\"' -f4 || echo 'N/A'",
+                returnStdout: true
+            ).trim()
+            
+            metrics.coverage = coverage ?: 'N/A'
+            metrics.bugs = bugs ?: 'N/A'
+            metrics.vulnerabilities = vulnerabilities ?: 'N/A'
+            metrics.codeSmells = codeSmells ?: 'N/A'
+            metrics.linesOfCode = linesOfCode ?: 'N/A'
+            
+            echo "OD ======> Extracted metrics: Coverage=${metrics.coverage}, Bugs=${metrics.bugs}, Vulnerabilities=${metrics.vulnerabilities}, Code Smells=${metrics.codeSmells}, Lines=${metrics.linesOfCode}"
+        } else {
+            echo "OD ======> No working SonarQube authentication found"
+            metrics = [
+                coverage: 'AUTH_ERROR',
+                bugs: 'AUTH_ERROR',
+                vulnerabilities: 'AUTH_ERROR',
+                codeSmells: 'AUTH_ERROR',
+                linesOfCode: 'AUTH_ERROR'
+            ]
+        }
         
     } catch (Exception e) {
         echo "OD ======> Error extracting SonarQube metrics: ${e.getMessage()}"
         metrics = [
-            coverage: 'N/A',
-            bugs: 'N/A',
-            vulnerabilities: 'N/A',
-            codeSmells: 'N/A',
-            linesOfCode: 'N/A'
+            coverage: 'ERROR',
+            bugs: 'ERROR',
+            vulnerabilities: 'ERROR',
+            codeSmells: 'ERROR',
+            linesOfCode: 'ERROR'
         ]
     }
     
@@ -199,6 +258,7 @@ def sendSimpleSonarQubeReport(buildStatus, sonarUrl, metrics) {
             .success { color: #4CAF50; font-weight: bold; }
             .error { color: #f44336; font-weight: bold; }
             .link { color: #2196F3; text-decoration: none; }
+            .debug { background-color: #fff3cd; padding: 10px; margin: 10px 0; }
         </style>
     </head>
     <body>
@@ -222,6 +282,12 @@ def sendSimpleSonarQubeReport(buildStatus, sonarUrl, metrics) {
                 <p><strong>🔒 Vulnerabilities:</strong> ${metrics.vulnerabilities}</p>
                 <p><strong>💡 Code Smells:</strong> ${metrics.codeSmells}</p>
                 <p><strong>📝 Lines of Code:</strong> ${metrics.linesOfCode}</p>
+            </div>
+            
+            <div class="debug">
+                <h4>Debug Information</h4>
+                <p><strong>SonarQube URL:</strong> <a href="${sonarUrl}" class="link">${sonarUrl}</a></p>
+                <p><strong>All Projects:</strong> <a href="http://192.168.1.4:9000/projects" class="link">View All SonarQube Projects</a></p>
             </div>
             
             <h3>Actions</h3>
@@ -256,4 +322,4 @@ def sendSimpleSonarQubeReport(buildStatus, sonarUrl, metrics) {
     } catch (Exception e) {
         echo "OD ======> Failed to send email: ${e.getMessage()}"
     }
-}
+} 
